@@ -1,18 +1,13 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-
 export async function POST(request) {
   try {
-    const body = await request.json()
-    const { imageB64, imageMime, settings = {}, fileCount = 1 } = body
+    const { imageB64, imageMime, settings = {}, fileCount = 1 } = await request.json()
 
     if (!imageB64 || !imageMime) {
       return Response.json({ error: 'Missing file data' }, { status: 400 })
     }
 
-    if (!process.env.GEMINI_API_KEY) {
-      return Response.json({ error: 'GEMINI_API_KEY missing' }, { status: 500 })
+    if (!process.env.OPENROUTER_API_KEY) {
+      return Response.json({ error: 'OPENROUTER_API_KEY missing in Vercel environment variables' }, { status: 500 })
     }
 
     const { standard = 'ANSI', method = 'AUTO', units = 'mm' } = settings
@@ -62,22 +57,42 @@ Analyze this engineering drawing. Return ONLY a raw JSON object. No explanation,
   }
 }`
 
-    let raw = ''
-    try {
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
-      const result = await model.generateContent([
-        { inlineData: { data: imageB64, mimeType: imageMime } },
-        PROMPT,
-      ])
-      raw = result.response.text()
-    } catch (apiErr) {
-      console.error('Gemini API error:', apiErr)
-      const msg = apiErr?.message || ''
-      if (msg.includes('429') || msg.includes('quota') || msg.includes('Too Many')) {
-        return Response.json({ error: 'Daily free quota reached (500/day). Wait until midnight Pacific time and try again, or create a new Google AI Studio project and API key.' }, { status: 429 })
-      }
-      return Response.json({ error: 'AI API error: ' + msg }, { status: 500 })
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://stackr-ai.vercel.app',
+        'X-Title': 'Stackr Tolerance Analyzer',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash:free',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: { url: `data:${imageMime};base64,${imageB64}` }
+              },
+              {
+                type: 'text',
+                text: PROMPT
+              }
+            ]
+          }
+        ]
+      })
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      console.error('OpenRouter error:', errText)
+      return Response.json({ error: 'AI API error: ' + errText.slice(0, 200) }, { status: 500 })
     }
+
+    const data = await response.json()
+    const raw = data.choices?.[0]?.message?.content || ''
 
     const clean = raw.replace(/```json\n?/g, '').replace(/```/g, '').trim()
     const jsonStart = clean.indexOf('{')
