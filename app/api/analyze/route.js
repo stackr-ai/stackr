@@ -64,7 +64,7 @@ Analyze this engineering drawing. Return ONLY a raw JSON object. No explanation,
 
     let raw = ''
     try {
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
       const result = await model.generateContent([
         { inlineData: { data: imageB64, mimeType: imageMime } },
         PROMPT,
