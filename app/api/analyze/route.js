@@ -3,16 +3,21 @@ export const runtime = 'edge'
 export async function POST(request) {
   try {
     const { imageB64, imageMime, settings = {}, fileCount = 1 } = await request.json()
+
     if (!imageB64 || !imageMime) {
       return Response.json({ error: 'Missing file data' }, { status: 400 })
     }
-    if (!process.env.OPENROUTER_API_KEY) {
-      return Response.json({ error: 'OPENROUTER_API_KEY missing' }, { status: 500 })
+
+    if (!process.env.GEMINI_API_KEY) {
+      return Response.json({ error: 'GEMINI_API_KEY missing in Vercel environment variables' }, { status: 500 })
     }
+
     const { standard = 'ANSI', method = 'AUTO', units = 'mm' } = settings
+
     const methodInstruction = method === 'AUTO'
       ? 'Select the best method: WORST CASE for 3 or fewer contributors or safety-critical, RSS for 4+ independent contributors, VECTOR for angular or rotational contributors.'
       : `User selected ${method} — use this method.`
+
     const PROMPT = `You are an expert mechanical engineer specializing in GD&T and tolerance stackup analysis.
 Standard: ${standard === 'ISO' ? 'ISO 2768' : 'ASME Y14.5'}. Units: ${units}. Files: ${fileCount}.
 ${methodInstruction}
@@ -52,35 +57,35 @@ Analyze this engineering drawing. Return ONLY a raw JSON object. No explanation,
   }
 }`
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://stackr-ai.vercel.app',
-        'X-Title': 'Stackr Tolerance Analyzer',
-      },
-      body: JSON.stringify({
-        model: 'nvidia/nemotron-nano-12b-v2-vl:free',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'image_url', image_url: { url: `data:${imageMime};base64,${imageB64}` } },
-              { type: 'text', text: PROMPT }
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { inline_data: { mime_type: imageMime, data: imageB64 } },
+              { text: PROMPT }
             ]
-          }
-        ]
-      })
-    })
+          }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
+        })
+      }
+    )
 
     if (!response.ok) {
       const errText = await response.text()
+      console.error('Gemini error:', errText)
+      if (errText.includes('429') || errText.includes('quota')) {
+        return Response.json({ error: 'Quota exceeded. Create a new API key at aistudio.google.com or wait until midnight Pacific time.' }, { status: 429 })
+      }
       return Response.json({ error: 'AI API error: ' + errText.slice(0, 200) }, { status: 500 })
     }
 
     const data = await response.json()
-    const raw = data.choices?.[0]?.message?.content || ''
+    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+
     const clean = raw.replace(/```json\n?/g, '').replace(/```/g, '').trim()
     const jsonStart = clean.indexOf('{')
     const jsonEnd = clean.lastIndexOf('}')
@@ -93,6 +98,7 @@ Analyze this engineering drawing. Return ONLY a raw JSON object. No explanation,
     return Response.json(parsed)
 
   } catch (err) {
+    console.error('Stackr error:', err)
     return Response.json({ error: err.message || 'Analysis failed.' }, { status: 500 })
   }
 }
