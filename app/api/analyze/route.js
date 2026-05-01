@@ -1,3 +1,5 @@
+export const runtime = 'edge'
+
 export async function POST(request) {
   try {
     const { imageB64, imageMime, settings = {}, fileCount = 1 } = await request.json()
@@ -5,7 +7,7 @@ export async function POST(request) {
       return Response.json({ error: 'Missing file data' }, { status: 400 })
     }
     if (!process.env.OPENROUTER_API_KEY) {
-      return Response.json({ error: 'OPENROUTER_API_KEY missing in Vercel environment variables' }, { status: 500 })
+      return Response.json({ error: 'OPENROUTER_API_KEY missing' }, { status: 500 })
     }
     const { standard = 'ANSI', method = 'AUTO', units = 'mm' } = settings
     const methodInstruction = method === 'AUTO'
@@ -49,6 +51,7 @@ Analyze this engineering drawing. Return ONLY a raw JSON object. No explanation,
     "recommendations": ["recommendation 1", "recommendation 2"]
   }
 }`
+
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -63,36 +66,33 @@ Analyze this engineering drawing. Return ONLY a raw JSON object. No explanation,
           {
             role: 'user',
             content: [
-              {
-                type: 'image_url',
-                image_url: { url: `data:${imageMime};base64,${imageB64}` }
-              },
-              {
-                type: 'text',
-                text: PROMPT
-              }
+              { type: 'image_url', image_url: { url: `data:${imageMime};base64,${imageB64}` } },
+              { type: 'text', text: PROMPT }
             ]
           }
         ]
       })
     })
+
     if (!response.ok) {
       const errText = await response.text()
-      console.error('OpenRouter error:', errText)
       return Response.json({ error: 'AI API error: ' + errText.slice(0, 200) }, { status: 500 })
     }
+
     const data = await response.json()
     const raw = data.choices?.[0]?.message?.content || ''
     const clean = raw.replace(/```json\n?/g, '').replace(/```/g, '').trim()
     const jsonStart = clean.indexOf('{')
     const jsonEnd = clean.lastIndexOf('}')
+
     if (jsonStart === -1 || jsonEnd === -1) {
       return Response.json({ error: 'AI did not return valid analysis. Try a clearer drawing image.' }, { status: 422 })
     }
+
     const parsed = JSON.parse(clean.slice(jsonStart, jsonEnd + 1))
     return Response.json(parsed)
+
   } catch (err) {
-    console.error('Stackr error:', err)
     return Response.json({ error: err.message || 'Analysis failed.' }, { status: 500 })
   }
 }
