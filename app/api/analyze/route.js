@@ -58,7 +58,7 @@ Analyze this engineering drawing. Return ONLY a raw JSON object. No explanation,
         'X-Title': 'Stackr Tolerance Analyzer',
       },
       body: JSON.stringify({
-        model: 'meta-llama/llama-4-maverick:free',
+        model: 'nvidia/nemotron-nano-12b-v2-vl:free',
         messages: [
           {
             role: 'user',
