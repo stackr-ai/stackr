@@ -70,7 +70,7 @@ function STLViewer({ file, onViewsReady }) {
 
   useEffect(() => {
     if (!file || !mountRef.current) return
-    let THREE, renderer
+    let renderer
 
     const loadThree = async () => {
       setStatus('Loading 3D engine...')
@@ -81,7 +81,7 @@ function STLViewer({ file, onViewsReady }) {
         s.onload = resolve; s.onerror = reject
         document.head.appendChild(s)
       })
-      THREE = window.THREE
+      const THREE = window.THREE
       setStatus('Parsing STL file...')
       const arrayBuffer = await file.arrayBuffer()
       let geometry
@@ -493,12 +493,21 @@ export default function AnalyzePage() {
       } else {
         throw new Error('Please upload an image, PDF, or STL file to analyze.')
       }
+
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageB64: fileB64, imageMime: fileMime, settings, fileCount: files.length }),
       })
-      const data = await res.json()
+
+      let data
+      try {
+        data = await res.json()
+      } catch {
+        const text = await res.text().catch(() => 'Unknown server error')
+        throw new Error('Server error: ' + text.slice(0, 300))
+      }
+
       if (!res.ok) throw new Error(data.error || 'Analysis failed')
       if (annotationImageUrl) data._annotationImageUrl = annotationImageUrl
       setAnalysis(data)
