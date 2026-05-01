@@ -75,12 +75,11 @@ function SettingsPanel({ settings, onChange }) {
 
 function UploadZone({ onFiles, dragging, setDragging }) {
   const inputRef = useRef()
+  const isImage = f => f.type.startsWith('image/') || f.name.match(/\.(png|jpg|jpeg|webp|gif)$/i)
   const onDrop = useCallback((e) => {
     e.preventDefault()
     setDragging(false)
-    const newFiles = Array.from(e.dataTransfer.files).filter(f =>
-      f.type.startsWith('image/') || f.type === 'application/pdf' || f.name.endsWith('.stl')
-    )
+    const newFiles = Array.from(e.dataTransfer.files).filter(f => isImage(f) || f.type === 'application/pdf')
     if (newFiles.length) onFiles(newFiles)
   }, [onFiles, setDragging])
 
@@ -106,7 +105,7 @@ function UploadZone({ onFiles, dragging, setDragging }) {
           <span key={t} className="text-xs font-mono bg-white/5 border border-white/10 rounded px-2 py-0.5 text-white/30">{t}</span>
         ))}
       </div>
-      <input ref={inputRef} type="file" accept=".png,.jpg,.jpeg,.webp,.pdf" multiple className="hidden"
+      <input ref={inputRef} type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.pdf" multiple className="hidden"
         onChange={e => { const fs = Array.from(e.target.files); if (fs.length) onFiles(fs) }} />
     </div>
   )
@@ -350,13 +349,15 @@ export default function AnalyzePage() {
   const [activePreview, setActivePreview] = useState(0)
   const [settings, setSettings] = useState({ standard: 'ANSI', method: 'AUTO', units: 'mm' })
 
+  const isImage = f => f.type.startsWith('image/') || f.name.match(/\.(png|jpg|jpeg|webp|gif)$/i)
+
   const handleFiles = (newFiles) => {
     setFiles(prev => [...prev, ...newFiles])
     newFiles.forEach(f => {
-      if (f.type.startsWith('image/')) {
+      if (isImage(f)) {
         setPreviews(prev => [...prev, { url: URL.createObjectURL(f), name: f.name, type: 'image' }])
       } else {
-        setPreviews(prev => [...prev, { url: null, name: f.name, type: f.name.endsWith('.stl') ? 'stl' : 'pdf' }])
+        setPreviews(prev => [...prev, { url: null, name: f.name, type: 'pdf' }])
       }
     })
     setAnalysis(null)
@@ -368,7 +369,7 @@ export default function AnalyzePage() {
     setLoading(true)
     setError(null)
     setAnalysis(null)
-    const imageFile = files.find(f => f.type.startsWith('image/'))
+    const imageFile = files.find(f => isImage(f))
     if (!imageFile) {
       setError('Please include at least one image file (PNG/JPG) for analysis.')
       setLoading(false)
@@ -381,7 +382,7 @@ export default function AnalyzePage() {
         const res = await fetch('/api/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageB64: b64, imageMime: imageFile.type, settings, fileCount: files.length }),
+          body: JSON.stringify({ imageB64: b64, imageMime: imageFile.type || 'image/jpeg', settings, fileCount: files.length }),
         })
         const data = await res.json()
         if (!res.ok) throw new Error(data.error || 'Analysis failed')
@@ -447,9 +448,9 @@ export default function AnalyzePage() {
             <div className="flex gap-3 flex-wrap">
               <button onClick={handleAnalyze} disabled={loading}
                 className="flex items-center gap-2 bg-accent hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed text-white font-mono font-medium px-6 py-2.5 rounded-lg transition-colors text-sm">
-                {loading ? <><span className="spinner" /> Analyzing...</> : `Run analysis →`}
+                {loading ? <><span className="spinner" /> Analyzing...</> : 'Run analysis →'}
               </button>
-              <button onClick={() => { const inp = document.createElement('input'); inp.type='file'; inp.multiple=true; inp.accept='.png,.jpg,.jpeg,.webp,.pdf'; inp.onchange=e=>handleFiles(Array.from(e.target.files)); inp.click() }}
+              <button onClick={() => { const inp = document.createElement('input'); inp.type='file'; inp.multiple=true; inp.accept='.png,.jpg,.jpeg,.webp,.gif,.pdf'; inp.onchange=e=>handleFiles(Array.from(e.target.files)); inp.click() }}
                 className="text-white/30 hover:text-white/60 font-mono text-sm px-4 py-2.5 rounded-lg border border-white/5 hover:border-white/10 transition-colors">
                 + Add files
               </button>
