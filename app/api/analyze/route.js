@@ -74,7 +74,7 @@ ANNOTATIONS: For each dimension that needs a change, add an annotation with x/y 
 
 Return valid JSON only.`
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
     const result = await model.generateContent([
       { inlineData: { data: imageB64, mimeType: imageMime } },
       PROMPT,
