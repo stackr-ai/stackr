@@ -4,33 +4,33 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
 
 export async function POST(request) {
   try {
-    const { imageB64, imageMime, settings = {}, fileCount = 1 } = await request.json()
+    const body = await request.json()
+    const { imageB64, imageMime, settings = {}, fileCount = 1 } = body
 
     if (!imageB64 || !imageMime) {
-      return Response.json({ error: 'Missing image data' }, { status: 400 })
+      return Response.json({ error: 'Missing file data' }, { status: 400 })
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      return Response.json({ error: 'GEMINI_API_KEY missing in Vercel environment variables' }, { status: 500 })
+      return Response.json({ error: 'GEMINI_API_KEY missing' }, { status: 500 })
     }
 
     const { standard = 'ANSI', method = 'AUTO', units = 'mm' } = settings
 
     const methodInstruction = method === 'AUTO'
-      ? 'Select the best method automatically: WORST CASE for ≤3 contributors or safety-critical, RSS for ≥4 independent contributors, VECTOR for angular/rotational contributors.'
-      : `The user has selected ${method} method — use this method for the analysis.`
+      ? 'Select the best method: WORST CASE for 3 or fewer contributors or safety-critical, RSS for 4+ independent contributors, VECTOR for angular or rotational contributors.'
+      : `User selected ${method} — use this method.`
 
     const PROMPT = `You are an expert mechanical engineer specializing in GD&T and tolerance stackup analysis.
-Standard: ${standard === 'ISO' ? 'ISO 2768' : 'ASME Y14.5'}. Units: ${units}. Files analyzed: ${fileCount}.
-
+Standard: ${standard === 'ISO' ? 'ISO 2768' : 'ASME Y14.5'}. Units: ${units}. Files: ${fileCount}.
 ${methodInstruction}
 
-Analyze this engineering drawing and return ONLY raw JSON (no markdown, no backticks):
+Analyze this engineering drawing. Return ONLY a raw JSON object. No explanation, no markdown, no code fences, just the JSON starting with { and ending with }.
 
 {
-  "method": "RSS" | "WORST CASE" | "VECTOR",
-  "methodRationale": "explanation of method choice",
-  "assemblySummary": "1-2 sentence description of the assembly",
+  "method": "RSS",
+  "methodRationale": "reason for method choice",
+  "assemblySummary": "1-2 sentence description",
   "standard": "${standard}",
   "units": "${units}",
   "dimensions": [
@@ -39,25 +39,17 @@ Analyze this engineering drawing and return ONLY raw JSON (no markdown, no backt
       "nominal": 0,
       "upperTol": 0,
       "lowerTol": 0,
-      "condition": "MMC" | "LMC" | "RFS" | null,
+      "condition": "MMC",
       "gdtControl": "description or null",
-      "suggestedChange": "e.g. Tighten to ±0.05mm to eliminate interference — or null if no change needed"
+      "suggestedChange": "specific change or null"
     }
   ],
   "gdtControls": [
-    { "type": "flatness|perpendicularity|parallelism|cylindricity|position|runout|concentricity|angularity|straightness|circularity", "value": 0, "feature": "name" }
+    { "type": "flatness", "value": 0, "feature": "name" }
   ],
   "stackupChain": ["feature1", "feature2"],
   "annotations": [
-    {
-      "index": 1,
-      "x": 45,
-      "y": 30,
-      "feature": "Housing bore diameter",
-      "description": "Tighten upper tolerance from +0.05 to +0.02mm",
-      "type": "critical" | "suggestion",
-      "side": "right"
-    }
+    { "index": 1, "x": 50, "y": 30, "feature": "name", "description": "what to change", "type": "critical", "side": "right" }
   ],
   "result": {
     "nominal": 0,
@@ -66,30 +58,40 @@ Analyze this engineering drawing and return ONLY raw JSON (no markdown, no backt
     "totalWCTolerance": 0,
     "totalRSSTolerance": 0,
     "sigma": 0,
-    "recommendations": ["rec1", "rec2"]
+    "recommendations": ["recommendation 1", "recommendation 2"]
   }
-}
+}`
 
-ANNOTATIONS: For each dimension that needs a change, add an annotation with x/y as percentage positions (0-100) on the image where the dimension callout is located. Use type "critical" for interference risks, "suggestion" for improvements. Estimate positions from visible drawing features.
+    let raw = ''
+    try {
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+      const result = await model.generateContent([
+        { inlineData: { data: imageB64, mimeType: imageMime } },
+        PROMPT,
+      ])
+      raw = result.response.text()
+    } catch (apiErr) {
+      console.error('Gemini API error:', apiErr)
+      const msg = apiErr?.message || ''
+      if (msg.includes('429') || msg.includes('quota') || msg.includes('Too Many')) {
+        return Response.json({ error: 'Daily free quota reached (500/day). Wait until midnight Pacific time and try again, or create a new Google AI Studio project and API key.' }, { status: 429 })
+      }
+      return Response.json({ error: 'AI API error: ' + msg }, { status: 500 })
+    }
 
-Return valid JSON only.`
+    const clean = raw.replace(/```json\n?/g, '').replace(/```/g, '').trim()
+    const jsonStart = clean.indexOf('{')
+    const jsonEnd = clean.lastIndexOf('}')
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
-    const result = await model.generateContent([
-      { inlineData: { data: imageB64, mimeType: imageMime } },
-      PROMPT,
-    ])
+    if (jsonStart === -1 || jsonEnd === -1) {
+      return Response.json({ error: 'AI did not return valid analysis. Try a clearer drawing image.' }, { status: 422 })
+    }
 
-    const raw = result.response.text()
-    const clean = raw.replace(/```json\n?|```/g, '').trim()
-    const parsed = JSON.parse(clean)
-
+    const parsed = JSON.parse(clean.slice(jsonStart, jsonEnd + 1))
     return Response.json(parsed)
+
   } catch (err) {
     console.error('Stackr error:', err)
-    if (err instanceof SyntaxError) {
-      return Response.json({ error: 'Could not parse drawing. Try a clearer image.' }, { status: 422 })
-    }
     return Response.json({ error: err.message || 'Analysis failed.' }, { status: 500 })
   }
 }
